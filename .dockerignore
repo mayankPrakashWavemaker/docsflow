@@ -1,0 +1,14 @@
+# Ignore files that should not be copied into the Docker image
+node_modules
+.next
+.git
+.gitignore
+.env
+*.local
+*.log
+Dockerfile
+docker-compose*.yml
+README.md
+npm-debug.log
+dist
+coverage
