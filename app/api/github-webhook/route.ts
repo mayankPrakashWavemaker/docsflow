@@ -94,50 +94,15 @@ export async function POST(req: NextRequest) {
       
       // Use existing models if available to prevent OverwriteModelError and avoid read-only delete error
       const TechStackModel = (conn.models.TechStack as any) || conn.model<ITechStack>("TechStack", TS_Schema, TECH_STACK_COLLECTION);
-      const SyncMetaModel = (conn.models.SyncMeta as any) || conn.model<ISyncMeta>("SyncMeta", SyncMetaSchema, 'meta_data');
-
-      const meta = await SyncMetaModel.findOne({ key: 'tech-stack-sync' });
-      const currentCommit = payload.after;
-      
-      const allAdded = new Set<string>();
-      const allModified = new Set<string>();
+      // Process removed files first
       const allRemoved = new Set<string>();
+      const allModified = new Set<string>();
 
-      let syncSuccess = true;
-
-      if (meta && meta.last_sync_commit_id) {
-        console.log(`Comparing changes from ${meta.last_sync_commit_id} to ${currentCommit}`);
-        try {
-          const { data: comparison } = await octokit.rest.repos.compareCommits({
-            owner: OWNER,
-            repo: REPO,
-            base: meta.last_sync_commit_id,
-            head: currentCommit,
-          });
-
-          comparison.files?.forEach(file => {
-            if (file.filename.startsWith(DATA_PATH) && file.filename.endsWith(".json")) {
-              if (file.status === "added") allAdded.add(file.filename);
-              else if (file.status === "modified") allModified.add(file.filename);
-              else if (file.status === "removed") allRemoved.add(file.filename);
-              else if (file.status === "renamed") {
-                if (file.previous_filename?.startsWith(DATA_PATH)) allRemoved.add(file.previous_filename);
-                allAdded.add(file.filename);
-              }
-            }
-          });
-        } catch (compareErr) {
-          console.error("Comparison failed:", compareErr);
-          syncSuccess = false;
-        }
-      } else {
-        console.log("No previous sync metadata found. Primary processing payload.");
-        payload.commits.forEach((commit: any) => {
-          commit.added.forEach((f: string) => f.startsWith(DATA_PATH) && f.endsWith(".json") && allAdded.add(f));
-          commit.modified.forEach((f: string) => f.startsWith(DATA_PATH) && f.endsWith(".json") && allModified.add(f));
-          commit.removed.forEach((f: string) => f.startsWith(DATA_PATH) && f.endsWith(".json") && allRemoved.add(f));
-        });
-      }
+      payload.commits.forEach((commit: any) => {
+        commit.removed.forEach((f: string) => f.startsWith(DATA_PATH) && f.endsWith(".json") && allRemoved.add(f));
+        commit.added.forEach((f: string) => f.startsWith(DATA_PATH) && f.endsWith(".json") && allModified.add(f));
+        commit.modified.forEach((f: string) => f.startsWith(DATA_PATH) && f.endsWith(".json") && allModified.add(f));
+      });
 
       // Handle removals
       for (const filePath of allRemoved) {
@@ -147,29 +112,29 @@ export async function POST(req: NextRequest) {
       }
 
       // Handle additions and modifications
-      const toUpdate = new Set([...allAdded, ...allModified]);
-      for (const filePath of toUpdate) {
+      for (const filePath of allModified) {
         const fileName = filePath.split("/").pop();
         if (fileName) {
-          const ok = await syncFile(TechStackModel, filePath, fileName);
-          if (!ok) syncSuccess = false;
-        }
-      }
+          // Check if we strictly need to sync (Compare commit ID and Timestamp)
+          const existingDoc = await TechStackModel.findById(fileName);
+          const metadata = await getFileMetadata(filePath, BRANCH);
 
-      // Only update metadata if ALL files synced successfully
-      if (syncSuccess) {
-        await SyncMetaModel.findOneAndUpdate(
-          { key: 'tech-stack-sync' },
-          { 
-            key: 'tech-stack-sync',
-            last_sync_commit_id: currentCommit,
-            last_sync_timestamp: new Date()
-          },
-          { upsert: true, new: true }
-        );
-        console.log(`Sync complete. Bookmark updated to ${currentCommit}`);
-      } else {
-        console.warn("Sync encountered errors. Bookmark NOT updated. It will retry on next push.");
+          if (!metadata) {
+             console.log(`Could not fetch metadata for ${fileName}, skipping.`);
+             continue;
+          }
+
+          const isNewer = !existingDoc || 
+                          existingDoc.last_commit_id !== metadata.last_commit_id ||
+                          new Date(metadata.last_update_timestamp!) > new Date(existingDoc.last_update_timestamp);
+
+          if (isNewer) {
+             const ok = await syncFile(TechStackModel, filePath, fileName);
+             if (!ok) console.error(`Failed to sync ${fileName}`);
+          } else {
+             console.log(`Skipping ${fileName} (Already up to date)`);
+          }
+        }
       }
     }
 

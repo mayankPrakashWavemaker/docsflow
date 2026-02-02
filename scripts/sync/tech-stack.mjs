@@ -44,9 +44,9 @@ export async function syncTechStack(connection, octokit) {
   const githubFileNames = githubFiles.map(f => f.name);
 
   // 2. Fetch current DB state
-  const dbDocs = await TechStack.find({}, { _id: 1, last_commit_id: 1 }).lean();
+  const dbDocs = await TechStack.find({}, { _id: 1, last_commit_id: 1, last_update_timestamp: 1 }).lean();
   const dbFileNames = dbDocs.map(d => d._id);
-  const dbCommitMap = Object.fromEntries(dbDocs.map(d => [d._id, d.last_commit_id]));
+  const dbDocMap = Object.fromEntries(dbDocs.map(d => [d._id, d]));
 
   // 3. Find files to delete (in DB but not in GitHub)
   const toDelete = dbFileNames.filter(name => !githubFileNames.includes(name));
@@ -70,9 +70,15 @@ export async function syncTechStack(connection, octokit) {
     });
 
     const latestCommitSha = commits[0].sha;
+    const latestTimestamp = new Date(commits[0].commit.committer.date);
+    const dbDoc = dbDocMap[fileName];
 
-    if (!dbCommitMap[fileName] || dbCommitMap[fileName] !== latestCommitSha) {
-      console.log(`Syncing ${fileName} (Reason: ${!dbCommitMap[fileName] ? 'Missing' : 'Outdated'})`);
+    const isMissing = !dbDoc;
+    const isOutdatedInfo = dbDoc && dbDoc.last_commit_id !== latestCommitSha;
+    const isNewerTimestamp = dbDoc && dbDoc.last_update_timestamp && latestTimestamp > new Date(dbDoc.last_update_timestamp);
+
+    if (isMissing || isOutdatedInfo || isNewerTimestamp) {
+      console.log(`Syncing ${fileName} (Reason: ${isMissing ? 'Missing' : isOutdatedInfo ? 'Commit Mismatch' : 'Newer Timestamp'})`);
       
       const { data: contentRes } = await octokit.rest.repos.getContent({
         owner: OWNER,
