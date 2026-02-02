@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 
-export interface ITechStack extends Document {
+export interface ITechStack extends Document<string> {
   _id: string; // JSON file name
   last_commit_id: string;
   last_update_timestamp: Date;

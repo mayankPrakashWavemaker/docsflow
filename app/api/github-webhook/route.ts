@@ -92,12 +92,9 @@ export async function POST(req: NextRequest) {
     if (event === "push" && payload.ref === `refs/heads/${BRANCH}`) {
       const conn = await connectDB(DOCS_DB);
       
-      // Clear models if they exist on the connection to avoid schema mismatch
-      if (conn.models.TechStack) delete conn.models.TechStack;
-      if (conn.models.SyncMeta) delete conn.models.SyncMeta;
-
-      const TechStackModel = conn.model<ITechStack>("TechStack", TS_Schema, TECH_STACK_COLLECTION);
-      const SyncMetaModel = conn.model<ISyncMeta>("SyncMeta", SyncMetaSchema, 'meta_data');
+      // Use existing models if available to prevent OverwriteModelError and avoid read-only delete error
+      const TechStackModel = (conn.models.TechStack as any) || conn.model<ITechStack>("TechStack", TS_Schema, TECH_STACK_COLLECTION);
+      const SyncMetaModel = (conn.models.SyncMeta as any) || conn.model<ISyncMeta>("SyncMeta", SyncMetaSchema, 'meta_data');
 
       const meta = await SyncMetaModel.findOne({ key: 'tech-stack-sync' });
       const currentCommit = payload.after;
