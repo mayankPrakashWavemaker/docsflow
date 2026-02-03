@@ -1,4 +1,3 @@
-
 FROM node:20-alpine AS base
 WORKDIR /app
 
@@ -7,6 +6,9 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 
 FROM base AS builder
+ARG MONGODB_URI
+ENV MONGODB_URI=$MONGODB_URI
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
