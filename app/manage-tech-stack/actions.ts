@@ -69,13 +69,16 @@ export async function updateDocsFlowData(version: string, newData: any) {
       }
     );
     
-    // No manual context update needed here as SSE will trigger re-fetch
+    // Revalidate the page to clear Next.js cache and show updated data
+    revalidatePath('/manage-tech-stack');
+    
     return { success: true };
   } catch (error: any) {
     console.error(`Failed to update docs_flow_data for ${version}:`, error);
     return { success: false, error: error.message };
   }
 }
+
 
 export async function getVersions() {
   try {

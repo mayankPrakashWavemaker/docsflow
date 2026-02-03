@@ -11,6 +11,9 @@ import { redirect } from "next/navigation";
 import { TechStackProvider } from "./TechStackContext";
 import TechStackManager from "./TechStackManager";
 
+// Force dynamic rendering to prevent caching issues in production
+export const dynamic = 'force-dynamic';
+
 export default async function ManageTechStack() {
   const session = await auth();
 

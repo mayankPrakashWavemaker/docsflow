@@ -909,6 +909,9 @@ export default function TechStackManager() {
         if (res.success) {
             setToast({ message: "Draft saved successfully!", type: 'success' });
             setTimeout(() => setToast(null), 3000);
+            
+            // Reload the latest data from the server to update the UI
+            await loadLatestSelectedData();
         } else {
             alert("Failed to save: " + res.error);
         }
