@@ -68,6 +68,7 @@ pipeline {
         AUTH_GOOGLE_SECRET = credentials('auth_google_secret')
         MONGODB_URI = credentials('mongodb_uri')
         GITHUB_TOKEN = credentials('docs_flow_github_token')
+        GITHUB_WEBHOOK_SECRET=('docs_flow_guthub_secret')
       }
       steps {
         script {
@@ -102,10 +103,11 @@ pipeline {
                 "AUTH_GOOGLE_SECRET=${shellQuote(AUTH_GOOGLE_SECRET)}",
                 "MONGODB_URI=${shellQuote(MONGODB_URI)}",
                 "GITHUB_TOKEN=${shellQuote(GITHUB_TOKEN)}",
+                "GITHUB_WEBHOOK_SECRET"=${shellQuote(GITHUB_WEBHOOK_SECRET)}",
                 "AUTH_TRUST_HOST='true'",
                 "AUTH_URL='https://docsflow.wavemaker.com'"
               ].join(' ')
-              def remoteRunCommand = "${environmentAssignments} docker run -d --name ${CONTAINER_NAME} -p ${HTTP_PORT}:3000 -e AUTH_SECRET -e AUTH_GOOGLE_ID -e AUTH_GOOGLE_SECRET -e MONGODB_URI -e GITHUB_TOKEN -e AUTH_TRUST_HOST -e AUTH_URL ${awsAccountID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
+              def remoteRunCommand = "${environmentAssignments} docker run -d --name ${CONTAINER_NAME} -p ${HTTP_PORT}:3000 -e AUTH_SECRET -e AUTH_GOOGLE_ID -e AUTH_GOOGLE_SECRET -e MONGODB_URI -e GITHUB_TOKEN -e GITHUB_WEBHOOK_SECRET -e AUTH_TRUST_HOST -e AUTH_URL ${awsAccountID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
               sh "ssh -o StrictHostKeyChecking=no ubuntu@${REMOTE_SERVER} ${shellQuote(remoteRunCommand)}"
             }
           }
