@@ -35,6 +35,7 @@ export async function syncTechStack() {
           last_updated_by: 'github',
           status: 'published',
           data: file.content,
+          docs_flow_data: file.content, // Resetting DocsFlow data to match GitHub on explicit sync
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
@@ -51,6 +52,28 @@ export async function syncTechStack() {
       success: false, 
       error: error.message || "Sync failed due to an unknown error" 
     };
+  }
+}
+
+export async function updateDocsFlowData(version: string, newData: any) {
+  try {
+    const conn = await connectDB(DB_CONFIG.DOCS_DB);
+    const TechStackModel = conn.models.TechStack || conn.model<ITechStack>('TechStack', TechStackSchema, DB_CONFIG.TECH_STACK_COLLECTION);
+    
+    await TechStackModel.findOneAndUpdate(
+      { version },
+      { 
+        docs_flow_data: newData,
+        status: 'modified',
+        last_updated_by: 'docsflow'
+      }
+    );
+    
+    // No manual context update needed here as SSE will trigger re-fetch
+    return { success: true };
+  } catch (error: any) {
+    console.error(`Failed to update docs_flow_data for ${version}:`, error);
+    return { success: false, error: error.message };
   }
 }
 

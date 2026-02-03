@@ -14,6 +14,7 @@ interface TechStackContextType {
   setSelectedVersion: (version: string) => void;
   refreshVersions: () => Promise<void>;
   hasSelectedDocUpdate: boolean;
+  incomingUpdate: any | null;
   clearUpdateNotification: () => void;
   loadLatestSelectedData: () => Promise<void>;
 }
@@ -33,7 +34,7 @@ export function TechStackProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   
   // Real-time states
-  const [hasSelectedDocUpdate, setHasSelectedDocUpdate] = useState(false);
+  const [incomingUpdate, setIncomingUpdate] = useState<any | null>(null);
   const selectedVersionRef = useRef<string | null>(null);
 
   const fetchVersions = useCallback(async (isInitial = false) => {
@@ -59,7 +60,7 @@ export function TechStackProvider({ children }: { children: React.ReactNode }) {
     try {
       const details = await getVersionDetails(version);
       setSelectedData(details);
-      setHasSelectedDocUpdate(false); // Reset update status when loading new/latest data
+      setIncomingUpdate(null); // Reset update status when loading new/latest data
     } catch (err) {
       console.error(`Failed to load details for ${version}`, err);
     } finally {
@@ -80,7 +81,7 @@ export function TechStackProvider({ children }: { children: React.ReactNode }) {
   };
 
   const clearUpdateNotification = () => {
-    setHasSelectedDocUpdate(false);
+    setIncomingUpdate(null);
   };
 
   // Initial Fetch
@@ -111,7 +112,7 @@ export function TechStackProvider({ children }: { children: React.ReactNode }) {
       if (data.type === 'update' || data.type === 'replace') {
         // If the updated document is the one we are currently viewing
         if (data.version === selectedVersionRef.current) {
-          setHasSelectedDocUpdate(true);
+          setIncomingUpdate(data);
         }
         
         // Also check if it's a new version that might need to be in the list
@@ -142,7 +143,8 @@ export function TechStackProvider({ children }: { children: React.ReactNode }) {
       error,
       setSelectedVersion,
       refreshVersions: () => fetchVersions(false),
-      hasSelectedDocUpdate,
+      hasSelectedDocUpdate: !!incomingUpdate,
+      incomingUpdate,
       clearUpdateNotification,
       loadLatestSelectedData
     }}>

@@ -25,8 +25,9 @@ export async function GET(req: NextRequest) {
             ...payload,
             version: doc.version,
             _id: doc._id,
-            // Only send metadata/version unless specifically needed to keep SSE light
             updatedAt: doc.updatedAt,
+            updatedFields: change.updateDescription?.updatedFields || {},
+            fullDocument: doc // Include full doc for comparison
           };
         }
 
