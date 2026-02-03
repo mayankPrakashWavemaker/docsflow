@@ -103,7 +103,7 @@ pipeline {
                 "AUTH_GOOGLE_SECRET=${shellQuote(AUTH_GOOGLE_SECRET)}",
                 "MONGODB_URI=${shellQuote(MONGODB_URI)}",
                 "GITHUB_TOKEN=${shellQuote(GITHUB_TOKEN)}",
-                "GITHUB_WEBHOOK_SECRET"=${shellQuote(GITHUB_WEBHOOK_SECRET)}",
+                "GITHUB_WEBHOOK_SECRET=${shellQuote(GITHUB_WEBHOOK_SECRET)}",
                 "AUTH_TRUST_HOST='true'",
                 "AUTH_URL='https://docsflow.wavemaker.com'"
               ].join(' ')
