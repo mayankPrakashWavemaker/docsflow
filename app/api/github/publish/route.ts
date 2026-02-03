@@ -79,11 +79,56 @@ export async function POST(req: Request) {
 
     console.log(`✅ Push successful. Commit: ${commitResult.commit.sha}`);
 
+    // --- PR Automation ---
+    const { UPSTREAM_OWNER, UPSTREAM_REPO, UPSTREAM_BRANCH } = GITHUB_CONFIG;
+    let prUrl = null;
+    let prStatus = 'already_exists';
+
+    try {
+      // 1. Check if PR already exists
+      const { data: existingPrs } = await octokit.rest.pulls.list({
+        owner: UPSTREAM_OWNER,
+        repo: UPSTREAM_REPO,
+        head: `${OWNER}:${targetBranch}`,
+        base: UPSTREAM_BRANCH,
+        state: 'open',
+      });
+
+      if (existingPrs.length === 0) {
+        console.log(`🔀 No open PR found. Creating new PR from ${OWNER}:${targetBranch} to ${UPSTREAM_OWNER}:${UPSTREAM_BRANCH}...`);
+        
+        const { data: newPr } = await octokit.rest.pulls.create({
+          owner: UPSTREAM_OWNER,
+          repo: UPSTREAM_REPO,
+          title: `docs(tech-stack): automated update for ${version}`,
+          head: `${OWNER}:${targetBranch}`,
+          base: UPSTREAM_BRANCH,
+          body: `## Tech Stack Update: ${version}\n\n- Automated update made using **DocsFlow Editor**\n- Triggered by: ${userEmail}\n- Latest Commit: ${commitResult.commit.sha}\n\nThis PR was automatically generated/updated by the DocsFlow application.`,
+          maintainer_can_modify: true,
+        });
+
+        prUrl = newPr.html_url;
+        prStatus = 'created';
+        console.log(`✅ PR created: ${prUrl}`);
+      } else {
+        prUrl = existingPrs[0].html_url;
+        console.log(`ℹ️ Existing PR found: ${prUrl}. Push has already updated it.`);
+      }
+    } catch (prError: any) {
+      console.error('⚠️ PR Automation Error:', prError.message);
+      // We don't fail the whole request if PR fails, as the push was successful
+      prStatus = 'error';
+    }
+
     return NextResponse.json({
       success: true,
       branch: targetBranch,
       sha: commitResult.commit.sha,
-      url: `${GITHUB_CONFIG.BASE_URL}/blob/${targetBranch}/${filePath}`
+      url: `${GITHUB_CONFIG.BASE_URL}/blob/${targetBranch}/${filePath}`,
+      pr: {
+        url: prUrl,
+        status: prStatus
+      }
     });
 
   } catch (error: any) {
