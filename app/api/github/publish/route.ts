@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { Octokit } from 'octokit';
-import { GITHUB_CONFIG } from '../../../../lib/config.mjs';
+import { GITHUB_CONFIG, DB_CONFIG } from '../../../../lib/config.mjs';
 import { auth } from '../../../../auth';
+import connectDB from '../../../../lib/db';
+import TechStack, { TechStackSchema, ITechStack } from '../../../../models/TechStack';
 
 /**
  * API to publish tech stack updates to GitHub.
@@ -78,6 +80,29 @@ export async function POST(req: Request) {
     });
 
     console.log(`✅ Push successful. Commit: ${commitResult.commit.sha}`);
+
+    // 🔥 FIX: Immediately update MongoDB to bridge the webhook gap
+    try {
+      const conn = await connectDB(DB_CONFIG.DOCS_DB);
+      const TechStackModel = conn.models.TechStack || conn.model<ITechStack>('TechStack', TechStackSchema, DB_CONFIG.TECH_STACK_COLLECTION);
+      
+      await TechStackModel.findOneAndUpdate(
+        { version },
+        { 
+          $set: {
+            data: data, // Now the Source of Truth is what we just pushed
+            docs_flow_data: data, // Clear modifer state
+            last_commit_id: commitResult.commit.sha,
+            last_update_timestamp: new Date(),
+            last_updated_by: 'docsflow',
+            status: 'published'
+          }
+        }
+      );
+      console.log(`✅ Local DB synced for ${version} after publish.`);
+    } catch (dbError) {
+      console.error('⚠️ Failed to update local DB after publish (Webhook should eventually fix this):', dbError);
+    }
 
     return NextResponse.json({
       success: true,

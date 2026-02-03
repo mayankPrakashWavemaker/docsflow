@@ -12,6 +12,18 @@ export async function syncTechStack(connection, octokit) {
   const { OWNER, REPO, BRANCH, DATA_PATH } = GITHUB_CONFIG;
   const { TECH_STACK_COLLECTION } = DB_CONFIG;
 
+  function isEqual(a, b) {
+    if (a === b) return true;
+    if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) return false;
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    for (const key of keysA) {
+      if (!keysB.includes(key) || !isEqual(a[key], b[key])) return false;
+    }
+    return true;
+  }
+
   const TechStackSchema = new mongoose.Schema({
     _id: String,
     version: String,
@@ -45,15 +57,24 @@ export async function syncTechStack(connection, octokit) {
   const githubFileNames = githubFiles.map(f => f.name);
 
   // 2. Fetch current DB state
-  const dbDocs = await TechStack.find({}, { _id: 1, last_commit_id: 1, last_update_timestamp: 1 }).lean();
+  const dbDocs = await TechStack.find({}, { _id: 1, last_commit_id: 1, last_update_timestamp: 1, data: 1, docs_flow_data: 1 }).lean();
   const dbFileNames = dbDocs.map(d => d._id);
   const dbDocMap = Object.fromEntries(dbDocs.map(d => [d._id, d]));
 
   // 3. Find files to delete (in DB but not in GitHub)
   const toDelete = dbFileNames.filter(name => !githubFileNames.includes(name));
-  if (toDelete.length > 0) {
-    console.log(`Removing ${toDelete.length} obsolete records:`, toDelete);
-    await TechStack.deleteMany({ _id: { $in: toDelete } });
+  for (const fileName of toDelete) {
+    const doc = dbDocMap[fileName];
+    const hasChanges = !isEqual(doc.data, doc.docs_flow_data);
+    
+    if (hasChanges) {
+      console.log(`Skipping deletion of obsolete ${fileName} (Found local un-published changes)`);
+      // Update status to 'draft' to signify it's disconnected from GitHub
+      await TechStack.updateOne({ _id: fileName }, { $set: { status: 'draft', last_updated_by: 'github' } });
+    } else {
+      console.log(`Removing obsolete record: ${fileName}`);
+      await TechStack.deleteOne({ _id: fileName });
+    }
   }
 
   // 4. Find files to sync (missing or mismatched commit)

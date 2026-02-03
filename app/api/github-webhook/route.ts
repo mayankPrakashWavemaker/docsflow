@@ -14,6 +14,21 @@ const { DOCS_DB, TECH_STACK_COLLECTION } = DB_CONFIG;
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
 /**
+ * Deep comparison helper
+ */
+function isEqual(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || a === null || typeof b !== "object" || b === null) return false;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (!keysB.includes(key) || !isEqual(a[key], b[key])) return false;
+  }
+  return true;
+}
+
+/**
  * Syncs a single tech stack file from GitHub to MongoDB
  */
 async function syncFile(TechStackModel: any, filePath: string, fileName: string) {
@@ -112,8 +127,25 @@ export async function POST(req: NextRequest) {
       // Handle removals
       for (const filePath of allRemoved) {
         const fileName = filePath.split("/").pop();
-        await TechStackModel.deleteOne({ _id: fileName });
-        console.log(`Deleted ${fileName}`);
+        
+        // 🔥 Protection: Only delete if local draft matches global data
+        const doc = await TechStackModel.findById(fileName);
+        if (doc) {
+           const hasChanges = !isEqual(doc.data, doc.docs_flow_data);
+           if (hasChanges) {
+              console.log(`Skipping deletion of ${fileName} (Found local un-published changes)`);
+              // Mark as draft so it's clear it's not in sync with GitHub anymore
+              await TechStackModel.updateOne({ _id: fileName }, { 
+                $set: { 
+                  status: 'draft', 
+                  last_updated_by: 'github' 
+                } 
+              });
+           } else {
+              await TechStackModel.deleteOne({ _id: fileName });
+              console.log(`Deleted ${fileName} (No local changes found)`);
+           }
+        }
       }
 
       // Handle additions and modifications

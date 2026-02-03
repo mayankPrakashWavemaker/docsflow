@@ -59,7 +59,7 @@ export async function syncTechStack() {
   }
 }
 
-export async function updateDocsFlowData(version: string, newData: any) {
+export async function updateDocsFlowData(version: string, newData: any, lastKnownUpdatedAt?: string) {
   // Issue 8: Validate input
   if (newData === null || newData === undefined) {
     return { success: false, error: "Data cannot be null or undefined" };
@@ -72,6 +72,18 @@ export async function updateDocsFlowData(version: string, newData: any) {
     const conn = await connectDB(DB_CONFIG.DOCS_DB);
     const TechStackModel = conn.models.TechStack || conn.model<ITechStack>('TechStack', TechStackSchema, DB_CONFIG.TECH_STACK_COLLECTION);
     
+    // Optimistic Locking: Check if the document has been updated by someone else
+    if (lastKnownUpdatedAt) {
+      const existing = await TechStackModel.findOne({ version });
+      if (existing && existing.updatedAt.toISOString() !== lastKnownUpdatedAt) {
+        return { 
+          success: false, 
+          error: "CONFLICT_ERROR", 
+          message: "This document has been updated by another user. Please refresh your data." 
+        };
+      }
+    }
+
     const result = await TechStackModel.findOneAndUpdate(
       { version },
       { 
@@ -89,7 +101,7 @@ export async function updateDocsFlowData(version: string, newData: any) {
     // Revalidate the page to clear Next.js cache and show updated data
     revalidatePath('/manage-tech-stack');
     
-    return { success: true };
+    return { success: true, updatedAt: result.updatedAt.toISOString() };
   } catch (error: any) {
     console.error(`Failed to update docs_flow_data for ${version}:`, error);
     return { success: false, error: error.message };

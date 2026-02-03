@@ -755,6 +755,9 @@ export default function TechStackManager() {
 
     const foundConflicts: any[] = [];
 
+    // Helper to find item by name in an array
+    const findByName = (list: any[], name: string) => list.find(it => (typeof it === 'string' ? it : it.name) === name);
+
     // Check for overlapping changes at the ITEM and FIELD level
     const checkConflicts = (currentInc: any, currentLocal: any, currentBase: any, path: string[]) => {
       for (const key in currentInc) {
@@ -764,21 +767,23 @@ export default function TechStackManager() {
         const baseVal = currentBase?.[key];
 
         if (Array.isArray(inVal)) {
-          // Conflict only if THIS array changed in both directions
+          // 🔥 ID-Based Merging: Avoid Index Fragility
           if (remoteChangedPaths.includes(fullPathStr) && locallyModifiedPaths.includes(fullPathStr)) {
-             inVal.forEach((incItem: any, idx: number) => {
-                const localItem = localVal?.[idx];
-                const baseItem = baseVal?.[idx];
+             inVal.forEach((incItem: any) => {
+                const name = typeof incItem === 'string' ? incItem : incItem.name;
+                const localItem = findByName(localVal || [], name);
+                const baseItem = findByName(baseVal || [], name);
                 
                 if (localItem && incItem && !isEqual(incItem, localItem)) {
                    const conflictingFields: any = {};
-                   const fields = ['name', 'version', 'url', 'link', 'description'];
+                   const allKeys = new Set([...Object.keys(incItem), ...Object.keys(localItem)]);
                    let hasFieldConflict = false;
 
-                   fields.forEach(f => {
-                      const fInc = incItem[f] || incItem[f === 'url' ? 'link' : 'url'];
-                      const fLoc = localItem[f] || localItem[f === 'url' ? 'link' : 'url'];
-                      const fBase = baseItem?.[f] || baseItem?.[f === 'url' ? 'link' : 'url'];
+                   allKeys.forEach(f => {
+                      if (f === 'id' || f === '_id') return; // Ignore internal IDs
+                      const fInc = incItem[f];
+                      const fLoc = localItem[f];
+                      const fBase = baseItem?.[f];
 
                       // A conflict exists if both remote and local changed a field to DIFFERENT values
                       if (fInc !== fLoc && fInc !== fBase && fLoc !== fBase) {
@@ -790,8 +795,7 @@ export default function TechStackManager() {
                    if (hasFieldConflict) {
                       foundConflicts.push({
                          path: fullPathStr,
-                         itemIdx: idx,
-                         name: incItem.name || localItem.name || `Item ${idx+1}`,
+                         name: name || `Unnamed Item`,
                          fields: conflictingFields
                       });
                    }
@@ -808,9 +812,8 @@ export default function TechStackManager() {
 
     if (foundConflicts.length > 0) {
       setConflicts(foundConflicts);
-      // Banner will show the conflict
     } else {
-      // NO CONFLICTS -> Silent Merge
+      // NO CONFLICTS -> Silent Merge (ID-Based)
       const mergeSilently = (target: any, incoming: any, base: any, path: string[] = []) => {
         const result = { ...target };
         for (const key in incoming) {
@@ -820,25 +823,30 @@ export default function TechStackManager() {
 
           if (Array.isArray(incValue)) {
             if (!locallyModifiedPaths.includes(fullPathStr)) {
-               // Safe to take entire incoming array if not touched locally
                result[key] = JSON.parse(JSON.stringify(incValue));
             } else {
-               // Partially touched locally. Merge items that were NOT touched locally.
-                const merged = incValue.map((incItem: any, idx: number) => {
-                  const localItem = target[key]?.[idx];
-                  const bItem = baseValue?.[idx];
-                  // If local item matches base, it hasn't been touched, so take incoming.
+               // 🔥 Reconstruct array based on IDs
+               const merged = incValue.map((incItem: any) => {
+                  const name = typeof incItem === 'string' ? incItem : incItem.name;
+                  const localItem = findByName(target[key] || [], name);
+                  const bItem = findByName(baseValue || [], name);
+                  
+                  // If local item matches base, it hasn't been touched, take incoming.
                   if (localItem && bItem && isEqual(localItem, bItem)) {
                      return JSON.parse(JSON.stringify(incItem));
                   }
                   return localItem || incItem;
                });
 
-               // Issue 5: Preserve local items beyond incoming length
+               // Add any new items that exist locally but not in incoming
                const localArray = target[key] || [];
-               if (localArray.length > incValue.length) {
-                  merged.push(...JSON.parse(JSON.stringify(localArray.slice(incValue.length))));
-               }
+               localArray.forEach((loc: any) => {
+                  const name = typeof loc === 'string' ? loc : loc.name;
+                  if (!findByName(incValue, name)) {
+                     merged.push(JSON.parse(JSON.stringify(loc)));
+                  }
+               });
+
                result[key] = merged;
             }
           } else if (typeof incValue === 'object' && incValue !== null) {
@@ -919,12 +927,22 @@ export default function TechStackManager() {
   const onSave = async () => {
     if (!selectedVersion || !localData) return;
     try {
-        const res = await updateDocsFlowData(selectedVersion, localData);
+        // 🔥 Optimistic Locking: Send the timestamp of the data we're editing
+        const res = await updateDocsFlowData(
+            selectedVersion, 
+            localData, 
+            selectedData?.updatedAt // Standard Next.js server actions handle this stringification
+        );
+
         if (res.success) {
             setToast({ message: "Draft saved successfully!", type: 'success' });
             setTimeout(() => setToast(null), 3000);
             
-            // Reload the latest data from the server to update the UI
+            // Reload the latest data from the server to update the UI (and get new updatedAt)
+            await loadLatestSelectedData();
+        } else if (res.error === "CONFLICT_ERROR") {
+            alert(res.message);
+            // Optionally force reload
             await loadLatestSelectedData();
         } else {
             alert("Failed to save: " + res.error);
