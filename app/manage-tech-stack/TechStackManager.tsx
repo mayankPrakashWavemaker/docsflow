@@ -838,17 +838,24 @@ export default function TechStackManager() {
                   return localItem || incItem;
                });
 
-               // Add any new items that exist locally but not in incoming
-               const localArray = target[key] || [];
-               localArray.forEach((loc: any) => {
-                  const name = typeof loc === 'string' ? loc : loc.name;
-                  if (!findByName(incValue, name)) {
-                     merged.push(JSON.parse(JSON.stringify(loc)));
-                  }
-               });
+                // Add new local items or items modified locally that were deleted in incoming
+                const localArray = target[key] || [];
+                localArray.forEach((loc: any) => {
+                   const name = typeof loc === 'string' ? loc : loc.name;
+                   if (!findByName(incValue, name)) {
+                      const bItem = findByName(baseValue || [], name);
+                      const isNewlyAddedLocally = !bItem;
+                      const isModifiedLocally = bItem && !isEqual(loc, bItem);
+                      
+                      if (isNewlyAddedLocally || isModifiedLocally) {
+                         merged.push(JSON.parse(JSON.stringify(loc)));
+                      }
+                      // If it existed in base and wasn't touched locally, respect the GitHub deletion
+                   }
+                });
 
-               result[key] = merged;
-            }
+                result[key] = merged;
+             }
           } else if (typeof incValue === 'object' && incValue !== null) {
             result[key] = mergeSilently(target[key] || {}, incValue, baseValue || {}, [...path, key]);
           } else {
@@ -1427,13 +1434,14 @@ export default function TechStackManager() {
                                 <button 
                                   onClick={() => {
                                      const newData = JSON.parse(JSON.stringify(localData));
-                                     const setFieldAt = (pathStr: string, idx: number, f: string, val: any) => {
+                                     const setFieldAt = (pathStr: string, name: string, f: string, val: any) => {
                                         const segments = pathStr.split('::');
                                         let current = newData;
                                         for (const k of segments) current = current[k];
-                                        if (current[idx]) current[idx][f] = val;
+                                        const item = current.find((it: any) => (typeof it === 'string' ? it : it.name) === name);
+                                        if (item && typeof item === 'object') item[f] = val;
                                      };
-                                     setFieldAt(conflict.path, conflict.itemIdx, field, values.incoming);
+                                     setFieldAt(conflict.path, conflict.name, field, values.incoming);
                                      setLocalData(newData);
                                      
                                      const newConflicts = [...conflicts];

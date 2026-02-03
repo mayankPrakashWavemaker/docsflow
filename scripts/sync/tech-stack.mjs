@@ -113,21 +113,29 @@ export async function syncTechStack(connection, octokit) {
       const content = JSON.parse(Buffer.from(contentRes.content, 'base64').toString());
       const commitInfo = commits[0];
 
+      const hasNoDraft = !dbDoc || isEqual(dbDoc.data, dbDoc.docs_flow_data);
+
+      const updateFields = {
+        version: fileName.replace('.json', ''),
+        last_commit_id: latestCommitSha,
+        last_update_timestamp: commitInfo.commit.committer?.date ? new Date(commitInfo.commit.committer.date) : new Date(),
+        last_github_user: commitInfo.author?.login || commitInfo.commit.author?.name || 'unknown',
+        last_updated_by: 'github',
+        status: hasNoDraft ? 'published' : 'modified',
+        data: content,
+      };
+
+      if (hasNoDraft) {
+        updateFields.docs_flow_data = content;
+      }
+
       await TechStack.findOneAndUpdate(
         { _id: fileName },
         {
-          $set: {
-            version: fileName.replace('.json', ''),
-            last_commit_id: latestCommitSha,
-            last_update_timestamp: commitInfo.commit.committer?.date ? new Date(commitInfo.commit.committer.date) : new Date(),
-            last_github_user: commitInfo.author?.login || commitInfo.commit.author?.name || 'unknown',
-            last_updated_by: 'github',
-            status: 'published',
-            data: content,
-          },
+          $set: updateFields,
           $setOnInsert: {
             _id: fileName,
-            docs_flow_data: content,
+            ...(hasNoDraft ? {} : { docs_flow_data: content }) // Fallback for safety, though hasNoDraft will be true for inserts
           }
         },
         { upsert: true }

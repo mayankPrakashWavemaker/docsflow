@@ -46,21 +46,30 @@ async function syncFile(TechStackModel: any, filePath: string, fileName: string)
     // @ts-ignore
     const content = JSON.parse(Buffer.from(contentRes.data.content, "base64").toString());
 
+    const existingDoc = await TechStackModel.findById(fileName);
+    const hasNoDraft = !existingDoc || isEqual(existingDoc.data, existingDoc.docs_flow_data);
+
+    const updateFields: any = {
+      version: fileName.replace(".json", ""),
+      last_commit_id: metadata?.last_commit_id,
+      last_update_timestamp: metadata?.last_update_timestamp,
+      last_github_user: metadata?.last_github_user,
+      last_updated_by: "github",
+      status: hasNoDraft ? "published" : "modified",
+      data: content,
+    };
+
+    if (hasNoDraft) {
+      updateFields.docs_flow_data = content;
+    }
+
     await TechStackModel.findOneAndUpdate(
       { _id: fileName },
       {
-        $set: {
-          version: fileName.replace(".json", ""),
-          last_commit_id: metadata?.last_commit_id,
-          last_update_timestamp: metadata?.last_update_timestamp,
-          last_github_user: metadata?.last_github_user,
-          last_updated_by: "github",
-          status: "published",
-          data: content,
-        },
+        $set: updateFields,
         $setOnInsert: {
           _id: fileName,
-          docs_flow_data: content,
+          ...(hasNoDraft ? {} : { docs_flow_data: content })
         }
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
