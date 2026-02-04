@@ -272,6 +272,9 @@ function ArrayEditor({
       const newItems = [...items];
       newItems[idx] = JSON.parse(JSON.stringify(match));
       onUpdate(newItems);
+    } else {
+      // If no match found in base, it means it's newly added. Undo should remove it.
+      onUpdate(items.filter((_, i) => i !== idx));
     }
   };
 
@@ -705,6 +708,7 @@ export default function TechStackManager() {
   const [localData, setLocalData] = useState<any>(null);
   const [originalGithubData, setOriginalGithubData] = useState<any>(null);
   const [originalDocsFlowData, setOriginalDocsFlowData] = useState<any>(null);
+  const [lastKnownUpdatedAt, setLastKnownUpdatedAt] = useState<string | null>(null);
   const [isModified, setIsModified] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [isSyncAllowed, setIsSyncAllowed] = useState(false);
@@ -872,6 +876,11 @@ export default function TechStackManager() {
       setOriginalGithubData(JSON.parse(JSON.stringify(incomingData)));
       setOriginalDocsFlowData(JSON.parse(JSON.stringify(incomingDocsFlowData)));
       
+      // Update optimistic locking timestamp
+      if (updatedDocument.updatedAt) {
+        setLastKnownUpdatedAt(updatedDocument.updatedAt);
+      }
+      
       setToast({ message: `Background update from ${sourceLabel} applied`, type: 'info' });
       clearUpdateNotification();
       setTimeout(() => setToast(null), 3000);
@@ -893,6 +902,7 @@ export default function TechStackManager() {
       setLocalData(JSON.parse(JSON.stringify(dataToLoad)));
       setOriginalGithubData(JSON.parse(JSON.stringify(selectedData.data))); // Store original GitHub data
       setOriginalDocsFlowData(JSON.parse(JSON.stringify(dataToLoad))); // Store original DocsFlow data (what localData started from)
+      setLastKnownUpdatedAt(selectedData.updatedAt || null);
       setIsModified(false);
       const keys = Object.keys(dataToLoad);
       if (keys.length > 0) setActiveCategory(keys[0]);
@@ -900,6 +910,7 @@ export default function TechStackManager() {
       setLocalData(null);
       setOriginalGithubData(null);
       setOriginalDocsFlowData(null);
+      setLastKnownUpdatedAt(null);
       setIsModified(false);
       setActiveCategory(null);
     }
@@ -938,18 +949,19 @@ export default function TechStackManager() {
         const res = await updateDocsFlowData(
             selectedVersion, 
             localData, 
-            selectedData?.updatedAt // Standard Next.js server actions handle this stringification
+            lastKnownUpdatedAt || undefined
         );
 
         if (res.success) {
             setToast({ message: "Draft saved successfully!", type: 'success' });
+            if (res.updatedAt) setLastKnownUpdatedAt(res.updatedAt);
             setTimeout(() => setToast(null), 3000);
             
-            // Reload the latest data from the server to update the UI (and get new updatedAt)
+            // Reload the latest data from the server to update the UI
             await loadLatestSelectedData();
         } else if (res.error === "CONFLICT_ERROR") {
             alert(res.message);
-            // Optionally force reload
+            // Force reload to get latest state
             await loadLatestSelectedData();
         } else {
             alert("Failed to save: " + res.error);
@@ -1250,10 +1262,10 @@ export default function TechStackManager() {
                             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-black rounded-xl transition-all ${
                                 isModified 
                                     ? 'text-slate-600 hover:bg-slate-100' 
-                                    : 'text-slate-300 cursor-not-allowed hidden'
+                                    : 'text-slate-300 cursor-not-allowed'
                             }`}
                         >
-                            <X size={14} /> DISCARD
+                            <X size={14} /> UNDO CHANGES
                         </button>
                         <button 
                              onClick={onSave}
@@ -1267,13 +1279,20 @@ export default function TechStackManager() {
                             <Save size={14} /> SAVE DRAFT
                         </button>
                         <button 
-                            disabled={isPublishing}
+                            disabled={isPublishing || isModified || isEqual(originalDocsFlowData, originalGithubData)}
                             onClick={onPublish}
                             className={`flex items-center gap-2 px-6 py-2.5 text-xs font-black rounded-xl shadow-lg transition-all ${
-                                isPublishing
-                                    ? 'bg-slate-700 text-white cursor-wait'
+                                (isPublishing || isModified || isEqual(originalDocsFlowData, originalGithubData))
+                                    ? 'bg-slate-300 text-white cursor-not-allowed'
                                     : 'bg-slate-900 text-white shadow-slate-200 hover:shadow-xl active:scale-95'
                             }`}
+                            title={
+                                isModified 
+                                    ? "Save changes before publishing" 
+                                    : isEqual(originalDocsFlowData, originalGithubData) 
+                                        ? "No differences to publish" 
+                                        : "Publish to GitHub"
+                            }
                         >
                             {isPublishing ? (
                                 <div className="h-3 w-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1456,6 +1475,9 @@ export default function TechStackManager() {
                                         if (incomingUpdate) {
                                            setOriginalGithubData(JSON.parse(JSON.stringify(incomingUpdate.fullDocument.data)));
                                            setOriginalDocsFlowData(JSON.parse(JSON.stringify(incomingUpdate.fullDocument.docs_flow_data)));
+                                            if (incomingUpdate.fullDocument.updatedAt) { 
+                                               setLastKnownUpdatedAt(incomingUpdate.fullDocument.updatedAt); 
+                                            }
                                         }
                                      }
                                   }}
@@ -1483,6 +1505,9 @@ export default function TechStackManager() {
                                         if (incomingUpdate) {
                                            setOriginalGithubData(JSON.parse(JSON.stringify(incomingUpdate.fullDocument.data)));
                                            setOriginalDocsFlowData(JSON.parse(JSON.stringify(incomingUpdate.fullDocument.docs_flow_data)));
+                                            if (incomingUpdate.fullDocument.updatedAt) { 
+                                               setLastKnownUpdatedAt(incomingUpdate.fullDocument.updatedAt); 
+                                            }
                                         }
                                      }
                                   }}
