@@ -37,6 +37,9 @@ export default async function ManageTechStack() {
                     priority
                   />
                   <span className="text-xl font-bold tracking-tight text-slate-900">DocsFlow</span>
+                  <span className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                    Beta
+                  </span>
               </Link>
               <span className="text-slate-300 mx-2">/</span>
               <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-full border border-slate-200">
