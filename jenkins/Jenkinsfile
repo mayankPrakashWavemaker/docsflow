@@ -7,11 +7,11 @@ pipeline {
 
   environment {
     REMOTE_SERVER = "172.31.27.164"
-    CONTAINER_NAME = 'wm-docs-flow'
+    CONTAINER_NAME = 'dev-wm-docs-flow'
     AWS_REGION = 'us-east-1'
     ECR_REPO = 'poc-misc'
     IMAGE_TAG = "dev.wm-docs-flow.${env.BUILD_NUMBER}"
-    HTTP_PORT = '8035'
+    HTTP_PORT = '8022'
     DEPLOYMENT_KEY = 'wm-docs-ssh-key'
 
     AUTH_SECRET = credentials('auth_secret')
