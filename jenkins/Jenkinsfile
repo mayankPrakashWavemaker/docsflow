@@ -10,7 +10,7 @@ pipeline {
     CONTAINER_NAME = 'wm-docs-flow'
     AWS_REGION = 'us-east-1'
     ECR_REPO = 'poc-misc'
-    IMAGE_TAG = "dev.wm-docs-flow.${env.BUILD_NUMBER}"
+    IMAGE_TAG = "prod.wm-docs-flow.${env.BUILD_NUMBER}"
     HTTP_PORT = '8035'
     DEPLOYMENT_KEY = 'wm-docs-ssh-key'
 
