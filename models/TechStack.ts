@@ -1,4 +1,19 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
+ 
+export interface IHistoryEntry {
+  timestamp: Date;
+  updated_by: 'github' | 'docsflow';
+  user?: {
+    name?: string;
+    email?: string;
+    image?: string;
+  };
+  github_info?: {
+    user?: string;
+    commit_id?: string;
+  };
+  changes?: any; // To store what changed if needed later
+}
 
 export interface ITechStack extends Document<string> {
   _id: string; // JSON file name
@@ -11,6 +26,7 @@ export interface ITechStack extends Document<string> {
   last_updated_by: 'github' | 'docsflow';
   status: 'modified' | 'draft' | 'published';
   version: string;
+  history: IHistoryEntry[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -52,6 +68,25 @@ export const TechStackSchema: Schema = new Schema(
     },
     docs_flow_data: {
       type: Schema.Types.Mixed,
+    },
+    history: {
+      type: [
+        {
+          timestamp: { type: Date, default: Date.now },
+          updated_by: { type: String, enum: ['github', 'docsflow'] },
+          user: {
+            name: String,
+            email: String,
+            image: String,
+          },
+          github_info: {
+            user: String,
+            commit_id: String,
+          },
+          changes: Schema.Types.Mixed,
+        },
+      ],
+      default: [],
     },
   },
   {

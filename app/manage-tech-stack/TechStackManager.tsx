@@ -27,7 +27,9 @@ import {
   CheckCircle2,
   Download,
   Info,
-  User
+  User,
+  History,
+  Clock
 } from "lucide-react";
 import Image from "next/image";
 import { useState, useEffect } from "react";
@@ -690,6 +692,75 @@ function SubSectionEditor({
   );
 }
 
+// Recursive Diff Viewer Component
+const DiffViewer = ({ diff, depth = 0 }: { diff: any, depth?: number }) => {
+  if (!diff) return null;
+
+  return (
+    <div className="flex flex-col gap-1">
+      {Object.entries(diff).map(([key, value]: [string, any]) => {
+        if (key === '_status') return null; // Skip internal status field
+        
+        const isModified = value?._status === 'modified';
+        const isAdded = value?._status === 'added';
+        const isDeleted = value?._status === 'deleted';
+        
+        // Leaf node change (primitive value change)
+        if (value && typeof value === 'object' && 'from' in value && 'to' in value) {
+            return (
+                <div key={key} className="text-xs grid grid-cols-[auto_1fr] gap-2 items-start py-1">
+                    <span className="font-bold text-slate-500">{key.replace(/_/g, ' ')}:</span>
+                    <div className="flex flex-col gap-0.5">
+                        <span className="text-red-500 line-through bg-red-50 px-1 rounded w-fit">{String(value.from)}</span>
+                        <span className="text-emerald-600 bg-emerald-50 px-1 rounded w-fit">{String(value.to)}</span>
+                    </div>
+                </div>
+            );
+        }
+
+        // Nested Object/Array Item Change
+        if (value && typeof value === 'object') {
+             // Check if it's an item addition/deletion
+             if (isAdded) {
+                 return (
+                     <div key={key} className="pl-2 border-l-2 border-emerald-200">
+                        <div className="text-xs font-bold text-emerald-600 mb-1 flex items-center gap-1">
+                            <Plus size={10} /> Added: {key.replace(/_/g, ' ')}
+                        </div>
+                        <pre className="text-[10px] bg-emerald-50 text-emerald-800 p-2 rounded overflow-x-auto">
+                            {JSON.stringify(value.to, null, 2)}
+                        </pre>
+                     </div>
+                 );
+             }
+             if (isDeleted) {
+                 return (
+                     <div key={key} className="pl-2 border-l-2 border-red-200">
+                        <div className="text-xs font-bold text-red-600 mb-1 flex items-center gap-1">
+                            <Trash2 size={10} /> Deleted: {key.replace(/_/g, ' ')}
+                        </div>
+                        <pre className="text-[10px] bg-red-50 text-red-800 p-2 rounded overflow-x-auto">
+                            {JSON.stringify(value.from, null, 2)}
+                        </pre>
+                     </div>
+                 );
+             }
+
+             // Recursive Modified Object
+             return (
+                 <div key={key} className="pl-2 border-l-2 border-slate-200 mt-1">
+                     <span className="text-xs font-bold text-slate-700 block mb-1">{key.replace(/_/g, ' ')}</span>
+                     <DiffViewer diff={value} depth={depth + 1} />
+                 </div>
+             );
+        }
+        
+        return null;
+      })}
+    </div>
+  );
+};
+
 export default function TechStackManager() {
   const { 
     versions, 
@@ -718,6 +789,8 @@ export default function TechStackManager() {
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [conflicts, setConflicts] = useState<any[]>([]);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
 
   // Deep diff helper to find modified paths
   const getDeepDiffPaths = (current: any, base: any, path: string[] = []): string[] => {
@@ -741,6 +814,12 @@ export default function TechStackManager() {
     if (!incomingUpdate || !localData || !originalDocsFlowData || !originalGithubData) return;
 
     const updatedDocument = incomingUpdate.fullDocument;
+    
+    // Update history immediately from the incoming live event
+    if (updatedDocument.history) {
+        setHistory(updatedDocument.history);
+    }
+
     const incomingData = updatedDocument.data; // GitHub data
     const incomingDocsFlowData = updatedDocument.docs_flow_data; // DocsFlow data
     const updatedFields = incomingUpdate.updatedFields || {};
@@ -762,125 +841,133 @@ export default function TechStackManager() {
     // Helper to find item by name in an array
     const findByName = (list: any[], name: string) => list.find(it => (typeof it === 'string' ? it : it.name) === name);
 
-    // Check for overlapping changes at the ITEM and FIELD level
-    const checkConflicts = (currentInc: any, currentLocal: any, currentBase: any, path: string[]) => {
-      for (const key in currentInc) {
+    // SMARTER MERGE: Recursive field-level merge that also identifies conflicts
+    const mergeAndFindConflicts = (target: any, incoming: any, base: any, path: string[] = []): any => {
+      const result = { ...target };
+      
+      for (const key in incoming) {
         const fullPathStr = [...path, key].join('::');
-        const inVal = currentInc[key];
-        const localVal = currentLocal?.[key];
-        const baseVal = currentBase?.[key];
+        const incVal = incoming[key];
+        const localVal = target[key];
+        const baseVal = base?.[key];
 
-        if (Array.isArray(inVal)) {
-          // 🔥 ID-Based Merging: Avoid Index Fragility
-          if (remoteChangedPaths.includes(fullPathStr) && locallyModifiedPaths.includes(fullPathStr)) {
-             inVal.forEach((incItem: any) => {
-                const name = typeof incItem === 'string' ? incItem : incItem.name;
-                const localItem = findByName(localVal || [], name);
-                const baseItem = findByName(baseVal || [], name);
-                
-                if (localItem && incItem && !isEqual(incItem, localItem)) {
-                   const conflictingFields: any = {};
-                   const allKeys = new Set([...Object.keys(incItem), ...Object.keys(localItem)]);
-                   let hasFieldConflict = false;
+        if (Array.isArray(incVal)) {
+           // 🔥 ID-Based Array Merging
+           const mergedArray = incVal.map((incItem: any) => {
+              const name = typeof incItem === 'string' ? incItem : incItem.name;
+              const localItem = findByName(localVal || [], name);
+              const bItem = findByName(baseVal || [], name);
+              
+              if (!localItem) return JSON.parse(JSON.stringify(incItem));
+              if (!bItem) {
+                 // Item added remotely, but also exists locally (name collision?)
+                 // If they are different, it's a conflict
+                 if (!isEqual(incItem, localItem)) {
+                    // Mark conflict but keep local for now
+                    const conflictingFields: any = {};
+                    const allKeys = new Set([...Object.keys(incItem), ...Object.keys(localItem)]);
+                    allKeys.forEach(f => {
+                       if (f === 'id' || f === '_id') return;
+                       if (incItem[f] !== localItem[f]) {
+                          conflictingFields[f] = { incoming: incItem[f], local: localItem[f], base: undefined };
+                       }
+                    });
+                    foundConflicts.push({ path: fullPathStr, name: name || 'Unnamed', fields: conflictingFields });
+                 }
+                 return localItem;
+              }
 
-                   allKeys.forEach(f => {
-                      if (f === 'id' || f === '_id') return; // Ignore internal IDs
-                      const fInc = incItem[f];
-                      const fLoc = localItem[f];
-                      const fBase = baseItem?.[f];
+              // Both have the item. Merge fields within the item.
+              if (typeof incItem === 'object' && incItem !== null) {
+                 const mergedItem = { ...localItem };
+                 const conflictingFields: any = {};
+                 let hasConflict = false;
 
-                      // A conflict exists if both remote and local changed a field to DIFFERENT values
-                      if (fInc !== fLoc && fInc !== fBase && fLoc !== fBase) {
-                         hasFieldConflict = true;
-                         conflictingFields[f] = { incoming: fInc, local: fLoc, base: fBase };
-                      }
-                   });
+                 const allKeys = new Set([...Object.keys(incItem), ...Object.keys(localItem)]);
+                 allKeys.forEach(f => {
+                    if (f === 'id' || f === '_id') return;
+                    const fInc = incItem[f];
+                    const fLoc = localItem[f];
+                    const fBase = bItem[f];
 
-                   if (hasFieldConflict) {
-                      foundConflicts.push({
-                         path: fullPathStr,
-                         name: name || `Unnamed Item`,
-                         fields: conflictingFields
-                      });
-                   }
-                }
-             });
+                    if (fInc !== fLoc) {
+                       if (fLoc === fBase) {
+                          // Local hasn't changed this field, but remote has. Take remote.
+                          mergedItem[f] = fInc;
+                       } else if (fInc !== fBase) {
+                          // BOTH changed to different values. CONFLICT.
+                          conflictingFields[f] = { incoming: fInc, local: fLoc, base: fBase };
+                          hasConflict = true;
+                       }
+                       // If fInc === fBase, remote hasn't changed it, keep local.
+                    }
+                 });
+
+                 if (hasConflict) {
+                    foundConflicts.push({ path: fullPathStr, name: name || 'Unnamed', fields: conflictingFields });
+                 }
+                 return mergedItem;
+              }
+              
+              // String case
+              if (incItem !== localItem && localItem !== bItem && incItem !== bItem) {
+                 foundConflicts.push({ path: fullPathStr, name: name, fields: { value: { incoming: incItem, local: localItem, base: bItem } } });
+              }
+              return localItem === bItem ? incItem : localItem;
+           });
+
+           // Add local items that don't exist in incoming (newly added locally or deleted remotely)
+           localVal?.forEach((locItem: any) => {
+              const name = typeof locItem === 'string' ? locItem : locItem.name;
+              if (!findByName(incVal, name)) {
+                 const bItem = findByName(baseVal || [], name);
+                 if (!bItem || !isEqual(locItem, bItem)) {
+                    // It was either newly added locally or was modified locally before being deleted remotely.
+                    // Keep it.
+                    mergedArray.push(JSON.parse(JSON.stringify(locItem)));
+                 }
+                 // If it was in base and UNCHANGED locally, it means it was deleted remotely. Respect that.
+              }
+           });
+
+           result[key] = mergedArray;
+
+        } else if (typeof incVal === 'object' && incVal !== null) {
+          result[key] = mergeAndFindConflicts(localVal || {}, incVal, baseVal || {}, [...path, key]);
+        } else {
+          // Primitive field merge
+          if (incVal !== localVal) {
+             if (localVal === baseVal) {
+                // Local hasn't changed, remote has. Take remote.
+                result[key] = incVal;
+             } else if (incVal !== baseVal) {
+                // Both changed. CONFLICT.
+                foundConflicts.push({
+                   path: path.join('::'),
+                   name: key,
+                   fields: { [key]: { incoming: incVal, local: localVal, base: baseVal } }
+                });
+             }
           }
-        } else if (typeof inVal === 'object' && inVal !== null) {
-          checkConflicts(inVal, localVal, baseVal, [...path, key]);
         }
       }
+      return result;
     };
 
-    checkConflicts(remoteDataToCompare, localData, baseDataForComparison, []);
+    const newLocalData = mergeAndFindConflicts(localData, remoteDataToCompare, baseDataForComparison);
+    
+    // Apply updates
+    setLocalData(newLocalData);
+    setOriginalGithubData(JSON.parse(JSON.stringify(incomingData)));
+    setOriginalDocsFlowData(JSON.parse(JSON.stringify(incomingDocsFlowData)));
+    
+    if (updatedDocument.updatedAt) {
+      setLastKnownUpdatedAt(updatedDocument.updatedAt);
+    }
 
     if (foundConflicts.length > 0) {
       setConflicts(foundConflicts);
     } else {
-      // NO CONFLICTS -> Silent Merge (ID-Based)
-      const mergeSilently = (target: any, incoming: any, base: any, path: string[] = []) => {
-        const result = { ...target };
-        for (const key in incoming) {
-          const fullPathStr = [...path, key].join('::');
-          const incValue = incoming[key];
-          const baseValue = base?.[key];
-
-          if (Array.isArray(incValue)) {
-            if (!locallyModifiedPaths.includes(fullPathStr)) {
-               result[key] = JSON.parse(JSON.stringify(incValue));
-            } else {
-               // 🔥 Reconstruct array based on IDs
-               const merged = incValue.map((incItem: any) => {
-                  const name = typeof incItem === 'string' ? incItem : incItem.name;
-                  const localItem = findByName(target[key] || [], name);
-                  const bItem = findByName(baseValue || [], name);
-                  
-                  // If local item matches base, it hasn't been touched, take incoming.
-                  if (localItem && bItem && isEqual(localItem, bItem)) {
-                     return JSON.parse(JSON.stringify(incItem));
-                  }
-                  return localItem || incItem;
-               });
-
-                // Add new local items or items modified locally that were deleted in incoming
-                const localArray = target[key] || [];
-                localArray.forEach((loc: any) => {
-                   const name = typeof loc === 'string' ? loc : loc.name;
-                   if (!findByName(incValue, name)) {
-                      const bItem = findByName(baseValue || [], name);
-                      const isNewlyAddedLocally = !bItem;
-                      const isModifiedLocally = bItem && !isEqual(loc, bItem);
-                      
-                      if (isNewlyAddedLocally || isModifiedLocally) {
-                         merged.push(JSON.parse(JSON.stringify(loc)));
-                      }
-                      // If it existed in base and wasn't touched locally, respect the GitHub deletion
-                   }
-                });
-
-                result[key] = merged;
-             }
-          } else if (typeof incValue === 'object' && incValue !== null) {
-            result[key] = mergeSilently(target[key] || {}, incValue, baseValue || {}, [...path, key]);
-          } else {
-            if (!locallyModifiedPaths.includes(fullPathStr)) {
-              result[key] = incValue;
-            }
-          }
-        }
-        return result;
-      };
-
-      const newLocalData = mergeSilently(localData, remoteDataToCompare, baseDataForComparison);
-      setLocalData(newLocalData);
-      setOriginalGithubData(JSON.parse(JSON.stringify(incomingData)));
-      setOriginalDocsFlowData(JSON.parse(JSON.stringify(incomingDocsFlowData)));
-      
-      // Update optimistic locking timestamp
-      if (updatedDocument.updatedAt) {
-        setLastKnownUpdatedAt(updatedDocument.updatedAt);
-      }
-      
       setToast({ message: `Background update from ${sourceLabel} applied`, type: 'info' });
       clearUpdateNotification();
       setTimeout(() => setToast(null), 3000);
@@ -902,6 +989,7 @@ export default function TechStackManager() {
       setLocalData(JSON.parse(JSON.stringify(dataToLoad)));
       setOriginalGithubData(JSON.parse(JSON.stringify(selectedData.data))); // Store original GitHub data
       setOriginalDocsFlowData(JSON.parse(JSON.stringify(dataToLoad))); // Store original DocsFlow data (what localData started from)
+      setHistory(selectedData.history || []); // Initialize history
       setLastKnownUpdatedAt(selectedData.updatedAt || null);
       setIsModified(false);
       const keys = Object.keys(dataToLoad);
@@ -910,6 +998,7 @@ export default function TechStackManager() {
       setLocalData(null);
       setOriginalGithubData(null);
       setOriginalDocsFlowData(null);
+      setHistory([]);
       setLastKnownUpdatedAt(null);
       setIsModified(false);
       setActiveCategory(null);
@@ -1309,6 +1398,18 @@ export default function TechStackManager() {
                             )}
                             {isPublishing ? 'PUBLISHING...' : 'PUBLISH TECH STACK'}
                         </button>
+                        <div className="w-px h-8 bg-slate-200 mx-1" />
+                        <button 
+                            onClick={() => setIsHistoryOpen(!isHistoryOpen)}
+                            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-black rounded-xl transition-all ${
+                                isHistoryOpen 
+                                    ? 'bg-blue-50 text-blue-600 border border-blue-200' 
+                                    : 'text-slate-600 hover:bg-slate-50 border border-transparent'
+                            }`}
+                        >
+                            <History size={14} />
+                            {isHistoryOpen ? 'HIDE HISTORY' : 'SHOW HISTORY'}
+                        </button>
                     </div>
                 </div>
 
@@ -1545,6 +1646,102 @@ export default function TechStackManager() {
            </div>
         </div>
       )}
+
+      {/* History Sidebar */}
+      <aside 
+        className={cn(
+            "fixed top-16 right-0 bottom-0 w-[400px] bg-white border-l border-slate-200 shadow-2xl z-[60] transition-transform duration-300 ease-in-out flex flex-col",
+            isHistoryOpen ? "translate-x-0" : "translate-x-full"
+        )}
+      >
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 text-blue-600 rounded-xl">
+                    <History size={20} />
+                </div>
+                <div>
+                    <h2 className="text-sm font-black text-slate-900 uppercase">Change History</h2>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Document updates & commits</p>
+                </div>
+            </div>
+            <button 
+                onClick={() => setIsHistoryOpen(false)}
+                className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-400 hover:text-slate-600"
+            >
+                <X size={20} />
+            </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {!history || history.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-4">
+                    <div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center">
+                        <Clock size={32} className="text-slate-200" />
+                    </div>
+                    <div>
+                        <p className="text-sm font-bold text-slate-900">No History Available</p>
+                        <p className="text-xs text-slate-400 mt-1">Changes will appear here once you save or sync updates.</p>
+                    </div>
+                </div>
+            ) : (
+                <div className="space-y-4">
+                    {[...history].reverse().map((entry: any, index: number) => (
+                        <div key={index} className="group relative pl-6 pb-6 border-l-2 border-slate-100 last:border-0 last:pb-0">
+                            {/* Timeline node */}
+                            <div className="absolute left-[-9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-blue-500 z-10" />
+                            
+                            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm group-hover:shadow-md transition-all">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                        {entry.updated_by === 'github' ? (
+                                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-900 text-white text-[9px] font-black uppercase rounded shadow-sm">
+                                                <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.83.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+                                                GitHub
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-black uppercase rounded shadow-sm">
+                                                DocsFlow
+                                            </div>
+                                        )}
+                                        <span className="text-[10px] text-slate-400 font-bold uppercase">{new Date(entry.timestamp).toLocaleDateString()} at {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                    {entry.user?.image ? (
+                                        <Image 
+                                            src={entry.user.image} 
+                                            alt={entry.user.name || 'User'} 
+                                            width={32} 
+                                            height={32} 
+                                            className="rounded-full ring-2 ring-slate-50"
+                                        />
+                                    ) : (
+                                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-xs">
+                                            {(entry.user?.name || entry.github_info?.user || '?').charAt(0).toUpperCase()}
+                                        </div>
+                                    )}
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-bold text-slate-900">{entry.user?.name || entry.github_info?.user || 'Unknown User'}</span>
+                                        <span className="text-[10px] text-slate-500 font-medium">{entry.user?.email || (entry.github_info?.commit_id ? `Commit: ${entry.github_info.commit_id.substring(0, 7)}` : 'Manual Update')}</span>
+                                    </div>
+                                </div>
+                                
+                                {entry.changes && (
+                                    <div className="mt-4 pt-4 border-t border-slate-50">
+                                        <div className="text-[9px] font-bold text-slate-400 uppercase mb-2">Change Details</div>
+                                        <div className="space-y-2">
+                                            <DiffViewer diff={entry.changes} />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+      </aside>
     </div>
   );
 }
