@@ -30,6 +30,9 @@ export default async function Dashboard() {
               priority
             />
             <span className="text-xl font-bold tracking-tight text-slate-900">DocsFlow</span>
+            <span className="inline-flex items-center rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-700 ring-1 ring-inset ring-blue-700/10">
+              Beta
+            </span>
           </div>
           <div className="flex items-center gap-4">
               <div className="flex items-center gap-3">

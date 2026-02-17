@@ -283,13 +283,13 @@ function ArrayEditor({
   // Calculate deleted items:
   // 1. Saved Deletion: In GitHub but NOT in DocsFlow
   const savedDeletions = originalGithubItems.filter(github => !findMatch(github, originalDocsFlowItems)).map(item => ({
-    ...item,
+    original: item,
     isSavedDeletion: true,
   }));
 
   // 2. Unsaved Deletion: In DocsFlow but NOT in current local items
   const unsavedDeletions = (originalDocsFlowItems || []).filter(docsFlow => !findMatch(docsFlow, items)).map(item => ({
-    ...item,
+    original: item,
     isUnsavedDeletion: true,
   }));
 
@@ -326,7 +326,9 @@ function ArrayEditor({
             
             // Unsaved Changes = diff(docs_flow_data, current state data)
             const isUnsavedAdded = !originalDocsFlowItem;
+            const isRestored = isUnsavedAdded && !!originalGithubItem;
             const isUnsavedModified = originalDocsFlowItem && !isEqual(originalDocsFlowItem, item);
+            const isRestoredModified = isRestored && !isEqual(originalGithubItem, item);
             
             const isUnsaved = isUnsavedAdded || isUnsavedModified;
             const isSaved = isSavedAdded || isSavedModified;
@@ -356,7 +358,7 @@ function ArrayEditor({
                 });
             };
             const origGithubIdx = getOriginalIndex(originalGithubItems);
-            const isPositionChanged = !isUnsavedAdded && origGithubIdx !== -1 && origGithubIdx !== idx;
+            const isPositionChanged = origGithubIdx !== -1 && origGithubIdx !== idx;
             
             // Determine Background and Colors
             let bgColorClass = 'bg-white';
@@ -371,6 +373,12 @@ function ArrayEditor({
               statusLabel = 'Unsaved - M';
               statusBadgeClass = 'bg-amber-500';
               statusChar = 'M';
+            } else if (isRestored) {
+              bgColorClass = isRestoredModified ? 'bg-indigo-50/50' : 'bg-blue-50/50';
+              borderColorClass = isRestoredModified ? 'border-indigo-200' : 'border-blue-200';
+              statusLabel = isRestoredModified ? 'Restored - M' : 'Restored';
+              statusBadgeClass = isRestoredModified ? 'bg-indigo-500' : 'bg-blue-500';
+              statusChar = 'R';
             } else if (isSavedModified) {
               bgColorClass = 'bg-orange-50/50';
               borderColorClass = 'border-orange-200';
@@ -577,10 +585,11 @@ function ArrayEditor({
                 <Trash2 size={12} /> Deleted Items ({deletedItems.length})
             </h4>
             <div className="space-y-3 opacity-60">
-                {deletedItems.map((item: any, dIdx) => {
+                {deletedItems.map((meta: any, dIdx) => {
+                    const item = meta.original;
                     const name = typeof item === 'string' ? item : (item.name || 'Unnamed');
-                    const isUnsavedDelete = item.isUnsavedDeletion;
-                    const isSavedDelete = item.isSavedDeletion;
+                    const isUnsavedDelete = meta.isUnsavedDeletion;
+                    const isSavedDelete = meta.isSavedDeletion;
 
                     let delBgClass = 'bg-slate-50/50 border-slate-200';
                     let delBadgeClass = 'bg-slate-400';
@@ -1071,7 +1080,7 @@ export default function TechStackManager() {
         const response = await fetch('/api/github/publish', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}) // No payload needed, API finds modified docs
+            body: JSON.stringify({ docId: selectedData?._id })
         });
 
         const result = await response.json();
@@ -1715,6 +1724,7 @@ export default function TechStackManager() {
                                             width={32} 
                                             height={32} 
                                             className="rounded-full ring-2 ring-slate-50"
+                                            unoptimized
                                         />
                                     ) : (
                                         <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-xs">
