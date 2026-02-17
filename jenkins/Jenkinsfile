@@ -35,7 +35,7 @@ pipeline {
             dev: [
               container: "dev-wm-docs-flow",
               port     : "8022",
-              authUrl  : "https://next-docsflow.wavemaker.ai",
+              authUrl  : "https://dev-docsflow.wavemaker.ai",
               imageTag : "dev.wm-docs-flow.${env.BUILD_NUMBER}"
             ],
             main: [
